@@ -1,0 +1,163 @@
+---
+title: "Project_1_Adriana"
+author: "Adriana Medina"
+date: "2024-02-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Introduction
+In this project, you’re given a text file with chess tournament results where the information has some structure. Your job is to create an R Markdown file that generates a .CSV file (that could for example be imported into a SQL database) with the following information for all of the players:
+ Player’s Name, Player’s State, Total Number of Points, Player’s Pre-Rating, and Average Pre Chess Rating of Opponents
+
+
+## Load Packages
+```{r}
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(tibble)
+library(knitr)
+```
+
+## Upload chess tournament data
+```{r}
+raw_data_path<-("https://raw.githubusercontent.com/amedina613/Project-1-Adriana/main/chess_tour.txt")
+
+raw_data <- readLines(raw_data_path)
+print(raw_data[1:6])
+```
+## Clean data, get rid of the dashes
+
+```{r}
+raw_data = str_replace_all(raw_data,"-","") 
+print(raw_data [1:6])
+```
+## We need to convert these lines into a dataset
+```{r } 
+r_data_set = read.delim(textConnection(raw_data),header = F, sep = "|", stringsAsFactors = F)
+```
+
+## The last column is blank. Remove last column
+
+```{r}
+r_data_set = r_data_set[,-11]
+```
+
+# Merge header rows
+```{r}
+header = paste(trimws(as.character(r_data_set[1,])), trimws(as.character(r_data_set[2,])))
+
+header = make.names(str_sub(header, 1,11))
+```
+
+```{r}
+r_data_set = as_tibble(r_data_set[-1:-2,])
+names(r_data_set) = header
+```
+
+# seq: This is a function in R used to generate sequences of numbers.
++ 1: This is the starting value of the sequence. In this case, it starts at 1.
++ nrow(r_data_set): This returns the number of rows in the data frame r_data_set. 
++ nrow() is a function in R that provides the number of rows in a matrix or data frame.
++ 2: This is the increment or step size. In this case, it's 2, so the sequence will skip every other number.
+```{r} 
+player_id = seq(1,nrow(r_data_set),2)
+states_ranks_id = seq(2,nrow(r_data_set),2)
+```
+
+```{r}
+chess_players = r_data_set[player_id,]
+state_ranks = select(r_data_set[states_ranks_id,], State = Pair.Num, Pre.Rating = Player.Name)
+```
+
+# Use Regex to filter out the Pre-rating value we need:
+
++ .*: Matches any characters before "R:".
++ R:: Matches the literal "R:".
++ \\s*: Matches zero or more whitespace characters after "R:".
++ ([0-9]{3,4}): Matches and captures between three and four digits.
++ .*: Matches any characters after the digits.
+
+```{r}
+pattern <- ".*R:\\s*([0-9]{3,4}).*"
+
+state_ranks$Pre.Rating <- gsub(pattern, "\\1", state_ranks$Pre.Rating)
+
+```
+# Combine columns
+```{r}
+chess_players = bind_cols(chess_players, state_ranks)
+
+print(chess_players[1:5,])
+```
+
+# The Round Columns contain two kinds of information in them. We just need a column with the opponent number and another with the opponent's corresponding pre-rating. 
+pivot_longer from tidyr allows me too transpose the Round #s and pivot the info from a wide format to a long format, meaning I am increasing the number of rows and decreasing the number of columns.
+
+```{r}
+chess_players <- chess_players %>%
+  pivot_longer(cols = starts_with("Round"), names_to = "Round", values_to = "Opponent.Num")
+```
+
+# Use regex to extract the opp number from the letter
+```{r}
+chess_players <- chess_players %>%
+  mutate(Opponent.Num = str_extract(Opponent.Num, "\\d+"))
+```
+
+# Add a column with corresponding Opponent Rating. Had trouble with this but research said to make sure the columns I am trying to work with have compatible data types.
+
+```{r}
+str(chess_players)
+```
+# They were not compatible so let's try to make the numbers interpretable as numbers
+```{r}
+chess_players = chess_players %>% 
+  mutate(Total.Pts = as.numeric(Total.Pts),
+         Pair.Num = parse_number(Pair.Num),
+         Player.Name = trimws(Player.Name),
+         Opponent.Num = as.numeric(Opponent.Num),
+         Pre.Rating = as.numeric(Pre.Rating))
+```
+
+# Now let's try to add a new column with the Opponent Rating
+```{r}
+chess_players <- chess_players %>%
+  mutate(Opponent.Rating = Pre.Rating[match(Opponent.Num, Pair.Num)])
+
+print(chess_players[1:10,])
+```
+# Calculate the avg pre chess rating of opponents, there were some N/A values so remove N/A values with na.rm
+```{r}
+chess_players <- chess_players %>%
+  group_by(Player.Name) %>%
+  mutate(Avg.pcr = mean(Opponent.Rating, na.rm = TRUE))
+
+print(chess_players[1:10,])
+```
+
+# Still need : Player’s Name, Player’s State, Total Number of Points, Player’s Pre-Rating, and Average Pre Chess Rating of Opponents
+
+This line was entered after feedback: my player's data was repeating itself 7 times per player, representing each round. 
+```{r}
+round_1_data <- chess_players %>%
+  filter(Round == "Round.1")
+```
+
+
+```{r}
+columns_keep <- c("Player.Name", "State", "Total.Pts", "Pre.Rating", "Avg.pcr")
+final_chess_data<- round_1_data[columns_keep]
+
+print(final_chess_data[1:10,])
+```
+
+```{r}
+write.csv(final_chess_data, file = "~/Documents/GitHub/Project-1-Adriana/final_chess_data.csv", row.names = FALSE)
+```
+
+
